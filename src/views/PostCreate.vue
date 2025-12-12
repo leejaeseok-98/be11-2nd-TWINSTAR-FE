@@ -195,16 +195,27 @@ export default {
         this.currentImageIndex++
       }
     },
+
+    // sanitize 함수: #, 대괄호, 따옴표, 쉼표, 백슬래시, 공백 제거
+  sanitizeTag(tag) {
+    if (tag == null) return ''
+    return String(tag).replace(/[#\x5B\x5D"',\\\s]/g, '').trim()
+  },
+
+    // 태그 추가
     addHashtag() {
-      const tag = this.hashtagInput.replace(/^#/, '').trim()
-      if (tag && !this.hashtags.includes(tag)) {
-        this.hashtags.push(tag)
+      const raw = this.hashtagInput || ''
+      const cleaned = this.sanitizeTag(raw.replace(/^#/, ''))
+      if (cleaned && !this.hashtags.includes(cleaned)) {
+        this.hashtags.push(cleaned)
       }
       this.hashtagInput = ''
     },
+
     removeHashtag(index) {
       this.hashtags.splice(index, 1)
     },
+
     async fetchPostData() {
       try {
         const response = await axios.get(
@@ -220,7 +231,8 @@ export default {
           const postData = response.data.result
           // 기존 데이터로 폼 초기화
           this.content = postData.content
-          this.hashtags = postData.hashTag || []
+          // 받아온 해시태그도 sanitize 해서 저장
+          this.hashtags = (postData.hashTag || []).map(t => this.sanitizeTag(String(t))).filter(Boolean)
           
           // 이미지 URL을 미리보기로 설정
           this.imagePreviews = postData.imageList || []
@@ -230,18 +242,21 @@ export default {
         console.error('게시물 데이터 로드 실패:', error)
       }
     },
+
     async createPost() {
       if (this.isSubmitting) return
       
       try {
         this.isSubmitting = true
 
+        const sanitizedTags = (this.hashtags || []).map(t => this.sanitizeTag(String(t))).filter(Boolean)
+
         if (this.isEditMode) {
-          // 수정 요청 데이터 구성
+          // 수정 요청 데이터 구성 (JSON 바디)
           const updateData = {
             postId: this.postId,
             content: this.content,
-            hashTag: this.hashtags || [],
+            hashTag: sanitizedTags,
             visibility: this.visibility
           }
 
@@ -260,17 +275,17 @@ export default {
             this.$router.push(`/post/detail/${this.postId}`)
           }
         } else {
-          // 새 게시물 작성 로직
+          // 새 게시물 작성 로직 (multipart/form-data)
           const formData = new FormData()
           formData.append('content', this.content)
           formData.append('visibility', this.visibility)
           
-          if (this.hashtags && this.hashtags.length > 0) {
-            formData.append('hashTag', JSON.stringify(this.hashtags))
-          } else {
-            formData.append('hashTag', JSON.stringify([]))
-          }
+          // 해시태그: 각 태그를 개별 필드로 추가 (Spring @ModelAttribute List<String>로 바인딩 가능)
+          sanitizedTags.forEach(tag => {
+            formData.append('hashTag', tag)
+          })
           
+          // 이미지 파일들
           if (this.images.length > 0) {
             this.images.forEach(image => {
               formData.append('imageFile', image)
@@ -298,6 +313,7 @@ export default {
         this.isSubmitting = false
       }
     },
+
     triggerFileInput() {
       this.$refs.fileInput.click()
     }
